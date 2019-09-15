@@ -25,7 +25,13 @@
  * Copyright (c) 2005-2019
  */
 
-#define VERSION "0.9.23-SNAPSHOT"
+#define VERSION "0.9.23_DL-SNAPSHOT"
+
+/*
+ * Alexey Gulenko
+ *
+ * This is a modification of testlib.h to use for DL checkers and interactive players.
+ */
 
 /* 
  * Mike Mirzayanov
@@ -43,23 +49,18 @@
 
 /* NOTE: This file contains testlib library for C++.
  *
- *   Check, using testlib running format:
- *     check.exe <Input_File> <Output_File> <Answer_File> [<Result_File> [-appes]],
- *   If result file is specified it will contain results.
+ *   Checker, using DL running format:
+ *     checker.exe <Input_File> <Answer_File> <Output_File> <Max_Points>
+ *   Results are written to the result file ("$result$.txt").
  *
- *   Validator, using testlib running format:                                          
- *     validator.exe < input.txt,
- *   It will return non-zero exit code and writes message to standard output.
- *
- *   Generator, using testlib running format:                                          
- *     gen.exe [parameter-1] [parameter-2] [... paramerter-n]
- *   You can write generated test(s) into standard output or into the file(s).
- *
- *   Interactor, using testlib running format:                                          
- *     interactor.exe <Input_File> <Output_File> [<Answer_File> [<Result_File> [-appes]]],
- *   Reads test from inf (mapped to args[1]), writes result to tout (mapped to argv[2],
- *   can be judged by checker later), reads program output from ouf (mapped to stdin),
+ *   Interactive player, compiled for DL with optional IO file names:
+ *     g++ -c player player.cpp [-DINFILE=<Input_File>] [-DOUTFILE=<Output_File>] [-DLOGFILE=<Log_File>]
+ *   Reads test from Input_File, writes log to Log_File, writes result to Output_File
+ *   (can be judged by checker later), reads program output from ouf (mapped to stdin),
  *   writes output to program via stdout (use cout, printf, etc).
+ *   Note: filenames must be passed with double-quotes (") as they're used as string literals.
+ *
+ *   Additionally, you can define BY_HAND for debug output
  */
 
 const char* latestFeatures[] = {
@@ -289,7 +290,89 @@ const char* latestFeatures[] = {
 #else
 #   define NORETURN
 #endif
-                   
+
+// ***************************************** DL_I *****************************************
+# ifndef INFILE
+#   define INFILE "$player$.in"
+# endif
+# ifndef OUTFILE
+#   define OUTFILE "$player$.out"
+# endif
+# ifndef LOGFILE
+#   define LOGFILE ""
+# endif
+
+// results/grades
+static const char
+  *DL_FAILED       = "0",
+  *DL_SUCCESS      = "OK!",
+  *DL_TESTER_FAIL  = "Interactive tester stopped with an error!",
+  *DL_BAD_IO       = "Incorrect input!",
+  *DL_OUT_OF_RANGE = "Given value out of range!";
+
+static bool _dl_inited = false;
+static int _dl_max;
+static char* _dl_outfile;
+
+static void _dl_init (const char* outfileName) {
+  size_t N = strlen(outfileName)+1;
+  _dl_outfile = new char[N];
+  strncpy(_dl_outfile, outfileName, N);
+  _dl_inited = true;
+  FILE* F = fopen(_dl_outfile, "w");
+  fprintf(F, "%s\n%s", DL_FAILED, DL_TESTER_FAIL);
+  fclose(F);
+}
+
+NORETURN static void _dl_rageExit (const char* errMsg, ...) {
+  if (!_dl_inited)
+    exit(EXIT_FAILURE);
+  FILE* F = fopen(_dl_outfile, "w");
+  va_list args;
+  va_start(args, errMsg);
+  fprintf(F, "%s\n", DL_FAILED);
+  vfprintf(F, errMsg, args);
+  vfprintf(stderr, errMsg, args);
+  va_end(args);
+  fclose(F);
+  exit(EXIT_FAILURE);
+}
+
+NORETURN static void _dl_succeed (int points, const char* comment, ...) {
+  if (!_dl_inited)
+    exit(EXIT_FAILURE);
+  FILE* F = fopen(_dl_outfile, "w");
+  va_list args;
+  va_start(args, comment);
+  fprintf(F, "%d\n", points);
+  vfprintf(F, comment, args);
+  va_end(args);
+  fclose(F);
+  exit(EXIT_SUCCESS);
+}
+
+NORETURN static void _dl_succeed (const char* comment, ...) {
+  if (!_dl_inited)
+    exit(EXIT_FAILURE);
+  FILE* F = fopen(_dl_outfile, "w");
+  va_list args;
+  va_start(args, comment);
+  fprintf(F, "%d\n", _dl_max);
+  vfprintf(F, comment, args);
+  va_end(args);
+  fclose(F);
+  exit(EXIT_SUCCESS);
+}
+
+NORETURN static void _dl_succeed () {
+  _dl_succeed(DL_SUCCESS);
+}
+
+static int _dl_getMaxPoints (char** argv) {
+  return atoi(argv[4]);
+}
+// ***************************************** DL_I *****************************************
+
 static char __testlib_format_buffer[16777216];
 static int __testlib_format_buffer_usage_count = 0;
 
@@ -2369,6 +2452,7 @@ InStream::~InStream()
     }
 }
 
+/*
 #ifdef __GNUC__
 __attribute__((const))
 #endif
@@ -2396,6 +2480,7 @@ int resultExitCode(TResult r)
         return PC_BASE_EXIT_CODE + (r - _partially);
     return FAIL_EXIT_CODE;
 }
+*/
 
 void InStream::textColor(
 #if !(defined(ON_WINDOWS) && (!defined(_MSC_VER) || _MSC_VER>1400)) && defined(__GNUC__)
@@ -2433,6 +2518,7 @@ void InStream::textColor(
 #endif
 }
 
+/*
 NORETURN void halt(int exitCode)
 {
 #ifdef FOOTER
@@ -2443,6 +2529,7 @@ NORETURN void halt(int exitCode)
 #endif
     std::exit(exitCode);
 }
+*/
 
 static bool __testlib_shouldCheckDirt(TResult result)
 {
@@ -2478,9 +2565,10 @@ NORETURN void InStream::quit(TResult result, const char* msg)
             quits(_fail, message + " (" + name + ")");
     }
 
-    std::FILE * resultFile;
+    //std::FILE * resultFile;
     std::string errorName;
-    
+    std::string resStatus;
+
     if (__testlib_shouldCheckDirt(result))
     {
         if (testlibMode != _interactor && !ouf.seekEof())
@@ -2488,20 +2576,23 @@ NORETURN void InStream::quit(TResult result, const char* msg)
     }
 
     int pctype = result - _partially;
-    bool isPartial = false;
+    //bool isPartial = false;
 
     switch (result)
     {
     case _ok:
         errorName = "ok ";
         quitscrS(LightGreen, errorName);
+        _dl_succeed("%s\n", msg);
         break;
     case _wa:
         errorName = "wrong answer ";
+        resStatus = "[WA]";
         quitscrS(LightRed, errorName);
         break;
     case _pe:
         errorName = "wrong output format ";
+        resStatus = "[PE]";
         quitscrS(LightRed, errorName);
         break;
     case _fail:
@@ -2510,28 +2601,34 @@ NORETURN void InStream::quit(TResult result, const char* msg)
         break;
     case _dirt:
         errorName = "wrong output format ";
+        resStatus = "[PE]";
         quitscrS(LightCyan, errorName);
         result = _pe;
         break;
     case _points:
         errorName = "points ";
         quitscrS(LightYellow, errorName);
+        _dl_succeed((int) ceil(__testlib_points), "[POINTS] %s\n", msg);
         break;
     case _unexpected_eof:
         errorName = "unexpected eof ";
+        resStatus = "[EOF]";
         quitscrS(LightCyan, errorName);
         break;
     default:
         if (result >= _partially)
         {
             errorName = format("partially correct (%d) ", pctype);
-            isPartial = true;
+            //isPartial = true;
+            resStatus = "[PARTIALLY]";
             quitscrS(LightYellow, errorName);
+            _dl_succeed(_dl_max/2, "%s %s", resStatus.c_str(), msg);
         }
         else
             quit(_fail, "What is the code ??? ");
     }
 
+    /*
     if (resultName != "")
     {
         resultFile = std::fopen(resultName.c_str(), "w");
@@ -2562,9 +2659,12 @@ NORETURN void InStream::quit(TResult result, const char* msg)
         if (NULL == resultFile || fclose(resultFile) != 0)
             quit(_fail, "Can not write to the result file");
     }
+    */
 
     quitscr(LightGray, message.c_str());
+# ifdef BY_HAND
     std::fprintf(stderr, "\n");
+# endif
 
     inf.close();
     ouf.close();
@@ -2574,10 +2674,11 @@ NORETURN void InStream::quit(TResult result, const char* msg)
 
     textColor(LightGray);
 
-    if (resultName != "")
-        std::fprintf(stderr, "See file to check exit message\n");
+    //if (resultName != "")
+    //    std::fprintf(stderr, "See file to check exit message\n");
 
-    halt(resultExitCode(result));
+    //halt(resultExitCode(result));
+    _dl_rageExit("%s %s", resStatus.c_str(), msg);
 }
 
 #ifdef __GNUC__
@@ -2647,12 +2748,13 @@ void InStream::quitscrS(WORD color, std::string msg)
 
 void InStream::quitscr(WORD color, const char* msg)
 {
-    if (resultName == "")
-    {
+# ifdef BY_HAND
+    //if (resultName == "") {
         textColor(color);
         std::fprintf(stderr, "%s", msg);
         textColor(LightGray);
-    }
+    //}
+# endif
 }
 
 void InStream::reset(std::FILE* file)
@@ -3951,6 +4053,7 @@ static void __testlib_ensuresPreconditions()
         quit(_fail, "Function __testlib_isNaN is not working correctly: possible reason is '-ffast-math'");
 }
 
+/*
 void registerGen(int argc, char* argv[], int randomGeneratorVersion)
 {
     if (randomGeneratorVersion < 0 || randomGeneratorVersion > 1)
@@ -3995,6 +4098,7 @@ void registerGen(int argc, char* argv[])
     registerGen(argc, argv, 0);
 }
 #endif
+*/
 
 void registerInteraction(int argc, char* argv[])
 {
@@ -4003,6 +4107,7 @@ void registerInteraction(int argc, char* argv[])
     testlibMode = _interactor;
     __testlib_set_binary(stdin);
 
+    /*
     if (argc > 1 && !strcmp("--help", argv[1]))
         __testlib_help();
     
@@ -4040,21 +4145,27 @@ void registerInteraction(int argc, char* argv[])
         }
     }
 #endif
+    */
 
-    inf.init(argv[1], _input);
+    _dl_max = 1;
+    inf.init(/*argv[1]*/INFILE, _input);
+    _dl_init(OUTFILE);
 
-    tout.open(argv[2], std::ios_base::out);
-    if (tout.fail() || !tout.is_open())
-        quit(_fail, std::string("Can not write to the test-output-file '") + argv[2] + std::string("'"));
+    if (strlen(LOGFILE) > 0) {
+        tout.open(/*argv[2]*/LOGFILE, std::ios_base::out);
+        if (tout.fail() || !tout.is_open())
+            quit(_fail, std::string("Can not write to the test-output-file '") + /*argv[2]*/LOGFILE + std::string("'"));
+    }
 
     ouf.init(stdin, _output);
-    
-    if (argc >= 4)
-        ans.init(argv[3], _answer);
-    else
+
+    //if (argc >= 4)
+    //    ans.init(argv[3], _answer);
+    //else
         ans.name = "unopened answer stream";
 }
 
+/*
 void registerValidation()
 {
     __testlib_ensuresPreconditions();
@@ -4098,6 +4209,7 @@ void registerValidation(int argc, char* argv[])
         }
     }        
 }
+*/
 
 void addFeature(const std::string& feature)
 {
@@ -4115,11 +4227,13 @@ void feature(const std::string& feature)
 
 void registerTestlibCmd(int argc, char* argv[])
 {
+    _dl_init("$result$.txt");
     __testlib_ensuresPreconditions();
 
     testlibMode = _checker;
     __testlib_set_binary(stdin);
 
+    /*
     if (argc > 1 && !strcmp("--help", argv[1]))
         __testlib_help();
 
@@ -4129,11 +4243,12 @@ void registerTestlibCmd(int argc, char* argv[])
             std::string("<input-file> <output-file> <answer-file> [<report-file> [<-appes>]]") + 
             "\nUse \"--help\" to get help information");
     }
+    */
 
-    if (argc == 4)
-    {
+    //if (argc == 4) {
         resultName = "";
         appesMode = false;
+    /*
     }
 
     if (argc == 5)
@@ -4155,12 +4270,15 @@ void registerTestlibCmd(int argc, char* argv[])
             appesMode = true;
         }
     }
+    */
 
     inf.init(argv[1], _input);
-    ouf.init(argv[2], _output);
-    ans.init(argv[3], _answer);
+    ans.init(argv[2], _answer);
+    ouf.init(argv[3], _output);
+    _dl_max = _dl_getMaxPoints(argv);
 }
 
+/*
 void registerTestlib(int argc, ...)
 {
     if (argc  < 3 || argc > 5)
@@ -4181,6 +4299,7 @@ void registerTestlib(int argc, ...)
     registerTestlibCmd(argc + 1, argv);
     delete[] argv;
 }
+*/
 
 static inline void __testlib_ensure(bool cond, const std::string& msg)
 {
