@@ -332,10 +332,16 @@ NORETURN static void _dl_rageExit (const char* errMsg, ...) {
   va_start(args, errMsg);
   fprintf(F, "%s\n", DL_FAILED);
   vfprintf(F, errMsg, args);
+# ifdef BY_HAND
   vfprintf(stderr, errMsg, args);
+# endif
   va_end(args);
   fclose(F);
+# ifdef BY_HAND
   exit(EXIT_FAILURE);
+# else
+  exit(EXIT_SUCCESS);
+# endif
 }
 
 NORETURN static void _dl_succeed (int points, const char* comment, ...) {
