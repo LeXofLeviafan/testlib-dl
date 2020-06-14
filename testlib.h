@@ -3940,7 +3940,7 @@ NORETURN void quit(TResult result, const char* msg)
 NORETURN void __testlib_quitp(double points, const char* message)
 {
     __testlib_points = points;
-    std::string stringPoints = removeDoubleTrailingZeroes(format("%.10f", points));
+    std::string stringPoints = format("%.3g", points);
 
     std::string quitMessage;
     if (NULL == message || 0 == strlen(message))
